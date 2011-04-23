@@ -36,7 +36,7 @@
       <include name="**/jug*.jar" />
     </fileset>
     <!-- in case we are running in release env -->
-    <fileset dir="${flume.base}">
+    <fileset dir="${flume.base}/lib">
       <include name="flume-*.jar" />
     </fileset>
     <pathelement location="${flume.base}/lib/"/>
@@ -50,7 +50,7 @@
       <classpath refid="classpath"/>
     </javac>   
 
-    <jar jarfile="cassandra_plugin.jar" basedir="build/classes"/>
+    <jar jarfile="output/cassandra_plugin.jar" basedir="build/classes"/>
   </target>
 
   <target name="clean">
