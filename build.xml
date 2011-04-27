@@ -29,8 +29,7 @@
     <!-- in case we are running in dev env -->
     <pathelement location="${flume.base}/build/classes"/>
     <fileset dir="${flume.base}/lib">
-      <include name="**/slf4j-*.jar" />
-      <include name="**/libthrift-*.jar" />
+      <include name="**/*.jar" />
     </fileset>
     <fileset dir="./lib">
       <include name="**/jug*.jar" />
