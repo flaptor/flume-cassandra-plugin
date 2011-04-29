@@ -34,31 +34,35 @@ import me.prettyprint.cassandra.model.ConfigurableConsistencyLevel;
  *    value is the event body.
  * 2. Inserts it into row "YYYYMMDD" (the current date) in the given ColumnFamily.
  *
- * SimpleCassandraSink primarily targets log storage right now.
+ * CassandraSink primarily targets log storage right now.
  */
-public class SimpleCassandraSink extends EventSink.Base {
+public class CassandraSink extends EventSink.Base {
+    private static final UUIDGenerator uuidGen = UUIDGenerator.getInstance();
+    private static final long MILLI_TO_MICRO = 1000; // 1ms = 1000us
 
     private String dataColumnFamily;
     private String indexColumnFamily;
     private Mutator<String> mutator; 
-    private final StringSerializer stringSerializer = new StringSerializer();
+    private final StringSerializer stringSerializer = StringSerializer.get();
+    private final String hostname;
+    private final String servicename;
 
-    //private CassandraClient cClient;
 
-    private static final UUIDGenerator uuidGen = UUIDGenerator.getInstance();
-
-    private static final long MILLI_TO_MICRO = 1000; // 1ms = 1000us
-
-    public SimpleCassandraSink(String keyspaceName, String cfName, String servers) {
+    public CassandraSink(String hostname, String servicename) {
+        this.hostname = hostname;
+        this.servicename = servicename;
         this.dataColumnFamily = dataColumnFamily;
         this.indexColumnFamily = indexColumnFamily;
 
         ConfigurableConsistencyLevel cl = new ConfigurableConsistencyLevel();
         cl.setDefaultReadConsistencyLevel(HConsistencyLevel.ONE);
-        cl.setDefaultWriteConsistencyLevel(HConsistencyLevel.TWO);
+        cl.setDefaultWriteConsistencyLevel(HConsistencyLevel.ONE);
 
-        Cluster cluster = HFactory.getCluster("IndexTank storage");
-        Keyspace keyspace = HFactory.createKeyspace(cfName, cluster, cl);
+        CassandraHostConfigurator chc = new CassandraHostConfigurator("cassandra1.internal.indextank.com:9160,cassandra2.internal.indextank.com:9160,cassandra3.internal.indextank.com:9160");
+        chc.setAutoDiscoverHosts(true);
+
+        Cluster cluster = HFactory.getOrCreateCluster("IndexTank storage", chc);
+        Keyspace keyspace = HFactory.createKeyspace("LOG", cluster, cl);
         mutator = HFactory.createMutator(keyspace, stringSerializer);
     }
 
@@ -77,11 +81,15 @@ public class SimpleCassandraSink extends EventSink.Base {
         public void append(Event event) throws IOException, InterruptedException {
 
             long timestamp = System.currentTimeMillis() * MILLI_TO_MICRO;
+            long hour = timestamp / (3600L * 1000L * MILLI_TO_MICRO);
 
             // Make the index column
             UUID uuid = uuidGen.generateTimeBasedUUID();
-            mutator.addInsertion(uuid.toString(), "Standard1", HFactory.createStringColumn("timestamp", Long.toString(timestamp)))
-                .addInsertion(uuid.toString(), "Standard1", HFactory.createStringColumn("data", new String(event.getBody())));
+            mutator.addInsertion(uuid.toString(), "log", HFactory.createStringColumn("timestamp", Long.toString(timestamp)))
+                .addInsertion(uuid.toString(), "log", HFactory.createStringColumn("data", new String(event.getBody())))
+                .addInsertion(uuid.toString(), "log", HFactory.createStringColumn("hour", String.valueOf(hour)))
+                .addInsertion(uuid.toString(), "log", HFactory.createStringColumn("host", hostname))
+                .addInsertion(uuid.toString(), "log", HFactory.createStringColumn("service", servicename));
             mutator.execute();
             super.append(event);
         }
@@ -112,20 +120,17 @@ public class SimpleCassandraSink extends EventSink.Base {
     }
 
     @Override
-        public void close() throws IOException {
-            //this.cClient.close();
-        }
+    public void close() throws IOException {
+    }
 
     public static SinkBuilder builder() {
         return new SinkBuilder() {
             @Override
                 public EventSink build(Context context, String ... args) {
-                    if (args.length < 4) {
-                        throw new IllegalArgumentException(
-                                "usage: simpleCassandraSink(\"keyspace\", \"column_family\", " +
-                                "\"host:port\"...");
+                    if (args.length != 2) {
+                        throw new IllegalArgumentException("usage: cassandra(\"hostname\", \"servicename\", ");
                     }
-                    return new SimpleCassandraSink(args[0], args[1], args[2]);
+                    return new CassandraSink(args[0], args[1]);
                 }
         };
     }
@@ -137,7 +142,7 @@ public class SimpleCassandraSink extends EventSink.Base {
     public static List<Pair<String, SinkBuilder>> getSinkBuilders() {
         List<Pair<String, SinkBuilder>> builders =
             new ArrayList<Pair<String, SinkBuilder>>();
-        builders.add(new Pair<String, SinkBuilder>("simpleCassandraSink", builder()));
+        builders.add(new Pair<String, SinkBuilder>("cassandra", builder()));
         return builders;
     }
 }
