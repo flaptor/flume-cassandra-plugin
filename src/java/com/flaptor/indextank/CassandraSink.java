@@ -44,13 +44,13 @@ public class CassandraSink extends EventSink.Base {
     private String indexColumnFamily;
     private Mutator<String> mutator; 
     private final StringSerializer stringSerializer = StringSerializer.get();
-    private final String hostname;
     private final String servicename;
+    private final String subservicename;
 
 
-    public CassandraSink(String hostname, String servicename) {
-        this.hostname = hostname;
+    public CassandraSink(String servicename, String subservicename) {
         this.servicename = servicename;
+        this.subservicename = subservicename;
         this.dataColumnFamily = dataColumnFamily;
         this.indexColumnFamily = indexColumnFamily;
 
@@ -80,16 +80,19 @@ public class CassandraSink extends EventSink.Base {
     @Override
         public void append(Event event) throws IOException, InterruptedException {
 
-            long timestamp = System.currentTimeMillis() * MILLI_TO_MICRO;
-            long hour = timestamp / (3600L * 1000L * MILLI_TO_MICRO);
+            long hour = event.getTimestamp();
 
             // Make the index column
-            UUID uuid = uuidGen.generateTimeBasedUUID();
-            mutator.addInsertion(uuid.toString(), "log", HFactory.createStringColumn("timestamp", Long.toString(timestamp)))
-                .addInsertion(uuid.toString(), "log", HFactory.createStringColumn("data", new String(event.getBody())))
-                .addInsertion(uuid.toString(), "log", HFactory.createStringColumn("hour", String.valueOf(hour)))
-                .addInsertion(uuid.toString(), "log", HFactory.createStringColumn("host", hostname))
-                .addInsertion(uuid.toString(), "log", HFactory.createStringColumn("service", servicename));
+            String uuid = uuidGen.generateTimeBasedUUID().toString();
+            mutator.addInsertion(uuid, "log", HFactory.createStringColumn("timestamp", Long.toString(event.getTimestamp())))
+                .addInsertion(uuid, "log", HFactory.createStringColumn("data", new String(event.getBody())))
+                .addInsertion(uuid, "log", HFactory.createStringColumn("hour", String.valueOf(hour)))
+                .addInsertion(uuid, "log", HFactory.createStringColumn("host", event.getHost()))
+                .addInsertion(uuid, "log", HFactory.createStringColumn("service", servicename))
+                .addInsertion(uuid, "log", HFactory.createStringColumn("severity", event.getPriority().toString()));
+            if (null != subservicename) {
+                mutator.addInsertion(uuid, "log", HFactory.createStringColumn("subservice", subservicename));
+            }
             mutator.execute();
             super.append(event);
         }
@@ -127,10 +130,14 @@ public class CassandraSink extends EventSink.Base {
         return new SinkBuilder() {
             @Override
                 public EventSink build(Context context, String ... args) {
-                    if (args.length != 2) {
-                        throw new IllegalArgumentException("usage: cassandra(\"hostname\", \"servicename\", ");
+                    if (args.length < 1 || args.length > 2) {
+                        throw new IllegalArgumentException("usage: cassandra\"servicename\"[, subservicename]");
                     }
-                    return new CassandraSink(args[0], args[1]);
+                    if (args.length == 1) {
+                        return new CassandraSink(args[0], null);
+                    } else {
+                        return new CassandraSink(args[0], args[1]);
+                    }
                 }
         };
     }
